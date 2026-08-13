@@ -1,6 +1,6 @@
 # OpenXingZhi Android CI
 
-Versioned reusable GitHub Actions workflows for XingZhi Android applications.
+Versioned reusable GitHub Actions workflows for XingZhi Android applications and Gradle libraries.
 
 ## Android build and release
 
@@ -57,7 +57,35 @@ with:
   get-changelog-task: ""
 ```
 
-## Required repository secrets
+## Gradle library build and publish
+
+JVM or Android libraries published with Gradle can call `.github/workflows/gradle-library.yml`:
+
+```yaml
+name: CI
+
+on:
+  push:
+    branches: [main]
+    tags: ["v*.*.*"]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  library:
+    permissions:
+      contents: read
+      packages: write
+    uses: OpenXingZhi/AndroidCI/.github/workflows/gradle-library.yml@v1
+```
+
+Branch pushes and pull requests run `build`. A `v*.*.*` tag first builds, verifies that the tag matches the Gradle project version, then runs `publish` with `packages: write`. Inputs can override `java-version`, `build-task`, and `publish-task`.
+
+## Required Android repository secrets
 
 - `KEYSTORE`: ASCII-armored, symmetrically encrypted keystore content.
 - `KEYSTORE_PASSPHRASE`: passphrase used to decrypt `KEYSTORE`.

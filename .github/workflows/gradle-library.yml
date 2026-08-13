@@ -1,0 +1,84 @@
+name: Gradle Library Build and Publish
+
+on:
+  workflow_call:
+    inputs:
+      java-version:
+        description: JDK version used by Gradle
+        type: string
+        default: "17"
+      build-task:
+        description: Gradle task used to build and test the library
+        type: string
+        default: build
+      publish-task:
+        description: Gradle task used to publish packages for version tags
+        type: string
+        default: publish
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: Build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v7
+
+      - name: Setup JDK
+        uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: ${{ inputs.java-version }}
+
+      - name: Setup Gradle
+        uses: gradle/actions/setup-gradle@v6
+        with:
+          cache-disabled: false
+          cache-read-only: ${{ github.event_name == 'pull_request' }}
+          cache-cleanup: on-success
+          validate-wrappers: true
+
+      - name: Build and test
+        run: ./gradlew ${{ inputs.build-task }} --no-daemon
+
+  publish:
+    name: Publish
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v7
+
+      - name: Setup JDK
+        uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: ${{ inputs.java-version }}
+
+      - name: Setup Gradle
+        uses: gradle/actions/setup-gradle@v6
+        with:
+          cache-disabled: false
+          cache-read-only: true
+          cache-cleanup: on-success
+          validate-wrappers: true
+
+      - name: Verify tag matches package version
+        shell: bash
+        run: |
+          version=$(./gradlew properties -q | awk '/^version:/{print $2}')
+          test "${GITHUB_REF_NAME#v}" = "$version"
+
+      - name: Publish package
+        run: ./gradlew ${{ inputs.publish-task }} --no-daemon
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
