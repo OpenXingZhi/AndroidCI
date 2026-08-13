@@ -133,18 +133,23 @@ jobs:
           printf '%s' "$ENCRYPTED_KEYSTORE" | gpg --batch --yes --pinentry-mode loopback \
             --passphrase "$PASSPHRASE" --decrypt > "${{ inputs.keystore-file }}"
 
-      - name: Configure Gradle properties
+      - name: Configure application Gradle properties
+        shell: bash
+        env:
+          EXTRA_GRADLE_PROPERTIES: ${{ secrets.GRADLE_PROPERTIES }}
+        run: |
+          mkdir -p "$HOME/.gradle"
+          printf '%s\n' "$EXTRA_GRADLE_PROPERTIES" >> "$HOME/.gradle/gradle.properties"
+
+      - name: Configure signing Gradle properties
         if: startsWith(github.ref, 'refs/tags/') || inputs.release || inputs.sign-debug-builds
         shell: bash
         env:
           KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
-          EXTRA_GRADLE_PROPERTIES: ${{ secrets.GRADLE_PROPERTIES }}
         run: |
-          mkdir -p "$HOME/.gradle"
           {
             printf '%s=%s\n' '${{ inputs.keystore-file-property }}' '${{ github.workspace }}/${{ inputs.keystore-file }}'
             printf '%s=%s\n' '${{ inputs.keystore-password-property }}' "$KEYSTORE_PASSWORD"
-            printf '%s\n' "$EXTRA_GRADLE_PROPERTIES"
           } >> "$HOME/.gradle/gradle.properties"
 
       - name: Run tests and build debug
