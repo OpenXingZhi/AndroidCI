@@ -30,7 +30,8 @@ jobs:
     uses: OpenXingZhi/AndroidCI/.github/workflows/android-release.yml@v1
     with:
       java-version: "21"
-      test-task: test
+      test-task: testDebugUnitTest
+      debug-build-task: assembleDebug
       build-task: assembleRelease
       release: ${{ github.event_name == 'workflow_dispatch' && inputs.action == 'release' }}
       keystore-file-property: signingKeystoreFile
@@ -42,7 +43,7 @@ Pin callers to a major tag such as `@v1`. Breaking interface changes require a n
 
 Gradle dependency/distribution caching is enabled through `gradle/actions/setup-gradle`. Pull requests restore caches read-only; trusted branch and tag builds update them after successful cleanup.
 
-Branch pushes and pull requests run only `test-task`. The signed `build-task` and build-output upload run only for a `v*.*.*` tag or a manual dispatch with `release: true`, so ordinary commits do not pay the R8/resource-shrinking cost of a release build.
+Branch pushes, pull requests, and manual `build` runs execute `test-task` and `debug-build-task` together in one Gradle invocation. The signed `build-task` and build-output upload run only for a `v*.*.*` tag or a manual dispatch with `release: true`, so ordinary commits still compile a Debug APK without paying the R8/resource-shrinking cost of a Release build.
 
 Applications without Gradle version/changelog tasks can use a static release version:
 
