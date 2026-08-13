@@ -42,6 +42,8 @@ Pin callers to a major tag such as `@v1`. Breaking interface changes require a n
 
 Gradle dependency/distribution caching is enabled through `gradle/actions/setup-gradle`. Pull requests restore caches read-only; trusted branch and tag builds update them after successful cleanup.
 
+Branch pushes and pull requests run only `test-task`. The signed `build-task` and build-output upload run only for a `v*.*.*` tag or a manual dispatch with `release: true`, so ordinary commits do not pay the R8/resource-shrinking cost of a release build.
+
 Applications without Gradle version/changelog tasks can use a static release version:
 
 ```yaml
