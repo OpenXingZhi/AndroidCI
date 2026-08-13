@@ -44,6 +44,10 @@ on:
         description: Gradle property read by the application for the keystore password
         type: string
         default: signingKeystorePassword
+      sign-debug-builds:
+        description: Decrypt the release keystore for ordinary debug builds
+        type: boolean
+        default: true
       release:
         description: Create a version/tag/changelog release from the current branch
         type: boolean
@@ -120,6 +124,7 @@ jobs:
           validate-wrappers: true
 
       - name: Decrypt signing keystore
+        if: startsWith(github.ref, 'refs/tags/') || inputs.release || inputs.sign-debug-builds
         shell: bash
         env:
           ENCRYPTED_KEYSTORE: ${{ secrets.KEYSTORE }}
@@ -129,6 +134,7 @@ jobs:
             --passphrase "$PASSPHRASE" --decrypt > "${{ inputs.keystore-file }}"
 
       - name: Configure Gradle properties
+        if: startsWith(github.ref, 'refs/tags/') || inputs.release || inputs.sign-debug-builds
         shell: bash
         env:
           KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
