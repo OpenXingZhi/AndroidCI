@@ -1,0 +1,217 @@
+name: Android Build and Release
+
+on:
+  workflow_call:
+    inputs:
+      java-version:
+        description: JDK version used by Gradle
+        type: string
+        default: "21"
+      test-task:
+        description: Gradle task used for validation; leave empty to skip
+        type: string
+        default: "test"
+      build-task:
+        description: Gradle task that produces signed release artifacts
+        type: string
+        required: true
+      artifact-name:
+        type: string
+        default: build-outputs
+      artifact-path:
+        type: string
+        default: app/build/outputs
+      reports-path:
+        type: string
+        default: app/build/reports
+      release-assets:
+        description: Newline-delimited globs attached to a GitHub Release
+        type: string
+        default: app/build/outputs/apk/*/release/*.apk
+      keystore-file:
+        description: Keystore path relative to repository root
+        type: string
+        default: signing.jks
+      keystore-file-property:
+        description: Gradle property read by the application for the keystore path
+        type: string
+        default: signingKeystoreFile
+      keystore-password-property:
+        description: Gradle property read by the application for the keystore password
+        type: string
+        default: signingKeystorePassword
+      release:
+        description: Create a version/tag/changelog release from the current branch
+        type: boolean
+        default: false
+      version-task:
+        description: Gradle task that prints the release version
+        type: string
+        default: printVersion
+      release-version-task:
+        description: Gradle task that advances and tags the version
+        type: string
+        default: releaseVersion
+      patch-changelog-task:
+        description: Gradle task that patches the changelog
+        type: string
+        default: patchChangelog
+      get-changelog-task:
+        description: Gradle task that prints release notes
+        type: string
+        default: getChangelog
+    secrets:
+      KEYSTORE:
+        required: true
+      KEYSTORE_PASSPHRASE:
+        required: true
+      KEYSTORE_PASSWORD:
+        required: true
+      GRADLE_PROPERTIES:
+        description: Optional newline-delimited, application-specific Gradle properties
+        required: false
+
+permissions:
+  contents: write
+
+jobs:
+  validation:
+    name: Validation
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v5
+      - uses: gradle/actions/wrapper-validation@v3
+
+  build:
+    name: Build
+    needs: validation
+    runs-on: ubuntu-latest
+    env:
+      ORG_GRADLE_PROJECT_GitHubPackagesUsername: ${{ github.actor }}
+      ORG_GRADLE_PROJECT_GitHubPackagesPassword: ${{ secrets.GITHUB_TOKEN }}
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+
+      - name: Setup JDK
+        uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: ${{ inputs.java-version }}
+
+      - name: Setup Gradle
+        uses: gradle/actions/setup-gradle@v4
+
+      - name: Decrypt signing keystore
+        shell: bash
+        env:
+          ENCRYPTED_KEYSTORE: ${{ secrets.KEYSTORE }}
+          PASSPHRASE: ${{ secrets.KEYSTORE_PASSPHRASE }}
+        run: |
+          printf '%s' "$ENCRYPTED_KEYSTORE" | gpg --batch --yes --pinentry-mode loopback \
+            --passphrase "$PASSPHRASE" --decrypt > "${{ inputs.keystore-file }}"
+
+      - name: Configure Gradle properties
+        shell: bash
+        env:
+          KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
+          EXTRA_GRADLE_PROPERTIES: ${{ secrets.GRADLE_PROPERTIES }}
+        run: |
+          mkdir -p "$HOME/.gradle"
+          {
+            printf '%s=%s\n' '${{ inputs.keystore-file-property }}' '${{ github.workspace }}/${{ inputs.keystore-file }}'
+            printf '%s=%s\n' '${{ inputs.keystore-password-property }}' "$KEYSTORE_PASSWORD"
+            printf '%s\n' "$EXTRA_GRADLE_PROPERTIES"
+          } >> "$HOME/.gradle/gradle.properties"
+
+      - name: Run tests
+        if: inputs.test-task != ''
+        run: ./gradlew ${{ inputs.test-task }} --no-daemon
+
+      - name: Advance release version
+        if: inputs.release
+        id: release-version
+        shell: bash
+        run: |
+          git config user.name "${{ github.actor }}"
+          git config user.email "${{ github.actor_id }}+${{ github.actor }}@users.noreply.github.com"
+          ./gradlew ${{ inputs.release-version-task }} --no-commit
+          version=$(./gradlew ${{ inputs.version-task }} -q)
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+
+      - name: Build signed release
+        run: ./gradlew ${{ inputs.build-task }} --no-daemon
+
+      - name: Patch and read changelog
+        if: startsWith(github.ref, 'refs/tags/') || inputs.release
+        id: changelog
+        shell: bash
+        run: |
+          ./gradlew ${{ inputs.patch-changelog-task }}
+          {
+            echo 'content<<EOF'
+            ./gradlew ${{ inputs.get-changelog-task }} --console=plain -q --no-header --no-summary --no-links
+            echo 'EOF'
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Upload build outputs
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ inputs.artifact-name }}
+          path: ${{ inputs.artifact-path }}
+          retention-days: 7
+
+      - name: Upload build reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: build-reports
+          path: ${{ inputs.reports-path }}
+          if-no-files-found: ignore
+          retention-days: 7
+
+      - name: Push changelog and tag
+        if: inputs.release
+        run: |
+          if ! git diff --quiet; then
+            git commit -am "docs(release): patch changelog"
+          fi
+          git push --follow-tags
+
+      - name: Create dispatched GitHub Release
+        if: inputs.release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          CHANGELOG_CONTENT: ${{ steps.changelog.outputs.content }}
+          RELEASE_VERSION: ${{ steps.release-version.outputs.version }}
+          RELEASE_ASSETS: ${{ inputs.release-assets }}
+        shell: bash
+        run: |
+          tag=$(git describe --tags --abbrev=0)
+          assets=()
+          while IFS= read -r pattern; do
+            [[ -z "$pattern" ]] && continue
+            for file in $pattern; do assets+=("$file"); done
+          done <<< "$RELEASE_ASSETS"
+          printf '%s\n' "$CHANGELOG_CONTENT" | head -n -1 | gh release create "$tag" \
+            "${assets[@]}" --title "Release v$RELEASE_VERSION" --notes-file -
+
+      - name: Create tagged GitHub Release
+        if: startsWith(github.ref, 'refs/tags/')
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          CHANGELOG_CONTENT: ${{ steps.changelog.outputs.content }}
+          RELEASE_ASSETS: ${{ inputs.release-assets }}
+        shell: bash
+        run: |
+          assets=()
+          while IFS= read -r pattern; do
+            [[ -z "$pattern" ]] && continue
+            for file in $pattern; do assets+=("$file"); done
+          done <<< "$RELEASE_ASSETS"
+          printf '%s\n' "$CHANGELOG_CONTENT" | gh release create "$GITHUB_REF_NAME" \
+            "${assets[@]}" --title "Release $GITHUB_REF_NAME" --notes-file - --generate-notes
