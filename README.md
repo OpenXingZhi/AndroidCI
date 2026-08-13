@@ -40,6 +40,20 @@ jobs:
 
 Pin callers to a major tag such as `@v1`. Breaking interface changes require a new major tag.
 
+Gradle dependency/distribution caching is enabled through `gradle/actions/setup-gradle`. Pull requests restore caches read-only; trusted branch and tag builds update them after successful cleanup.
+
+Applications without Gradle version/changelog tasks can use a static release version:
+
+```yaml
+with:
+  release: ${{ github.event_name == 'workflow_dispatch' && inputs.action == 'release' }}
+  release-version: ${{ inputs.version || '' }}
+  version-task: ""
+  release-version-task: ""
+  patch-changelog-task: ""
+  get-changelog-task: ""
+```
+
 ## Required repository secrets
 
 - `KEYSTORE`: ASCII-armored, symmetrically encrypted keystore content.

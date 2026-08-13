@@ -44,6 +44,10 @@ on:
         description: Create a version/tag/changelog release from the current branch
         type: boolean
         default: false
+      release-version:
+        description: Static release version when release-version-task is empty
+        type: string
+        default: ""
       version-task:
         description: Gradle task that prints the release version
         type: string
@@ -81,8 +85,8 @@ jobs:
     permissions:
       contents: read
     steps:
-      - uses: actions/checkout@v5
-      - uses: gradle/actions/wrapper-validation@v3
+      - uses: actions/checkout@v7
+      - uses: gradle/actions/wrapper-validation@v6
 
   build:
     name: Build
@@ -93,7 +97,7 @@ jobs:
       ORG_GRADLE_PROJECT_GitHubPackagesPassword: ${{ secrets.GITHUB_TOKEN }}
     steps:
       - name: Checkout code
-        uses: actions/checkout@v5
+        uses: actions/checkout@v7
         with:
           fetch-depth: 0
 
@@ -104,7 +108,12 @@ jobs:
           java-version: ${{ inputs.java-version }}
 
       - name: Setup Gradle
-        uses: gradle/actions/setup-gradle@v4
+        uses: gradle/actions/setup-gradle@v6
+        with:
+          cache-disabled: false
+          cache-read-only: ${{ github.event_name == 'pull_request' }}
+          cache-cleanup: on-success
+          validate-wrappers: true
 
       - name: Decrypt signing keystore
         shell: bash
@@ -132,26 +141,46 @@ jobs:
         if: inputs.test-task != ''
         run: ./gradlew ${{ inputs.test-task }} --no-daemon
 
-      - name: Advance release version
+      - name: Prepare release version
         if: inputs.release
         id: release-version
         shell: bash
+        env:
+          STATIC_VERSION: ${{ inputs.release-version }}
         run: |
           git config user.name "${{ github.actor }}"
           git config user.email "${{ github.actor_id }}+${{ github.actor }}@users.noreply.github.com"
-          ./gradlew ${{ inputs.release-version-task }} --no-commit
-          version=$(./gradlew ${{ inputs.version-task }} -q)
+          if [[ -n '${{ inputs.release-version-task }}' ]]; then
+            ./gradlew ${{ inputs.release-version-task }} --no-commit
+            version=$(./gradlew ${{ inputs.version-task }} -q)
+            tag=$(git describe --tags --abbrev=0)
+          else
+            if [[ -z "$STATIC_VERSION" ]]; then
+              echo 'release-version is required when release-version-task is empty' >&2
+              exit 1
+            fi
+            version="$STATIC_VERSION"
+            tag="v$version"
+            if git rev-parse "$tag" >/dev/null 2>&1; then
+              echo "Tag $tag already exists" >&2
+              exit 1
+            fi
+            git tag -a "$tag" -m "Release $tag"
+          fi
           echo "version=$version" >> "$GITHUB_OUTPUT"
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"
 
       - name: Build signed release
         run: ./gradlew ${{ inputs.build-task }} --no-daemon
 
       - name: Patch and read changelog
-        if: startsWith(github.ref, 'refs/tags/') || inputs.release
+        if: (startsWith(github.ref, 'refs/tags/') || inputs.release) && inputs.get-changelog-task != ''
         id: changelog
         shell: bash
         run: |
-          ./gradlew ${{ inputs.patch-changelog-task }}
+          if [[ -n '${{ inputs.patch-changelog-task }}' ]]; then
+            ./gradlew ${{ inputs.patch-changelog-task }}
+          fi
           {
             echo 'content<<EOF'
             ./gradlew ${{ inputs.get-changelog-task }} --console=plain -q --no-header --no-summary --no-links
@@ -159,7 +188,7 @@ jobs:
           } >> "$GITHUB_OUTPUT"
 
       - name: Upload build outputs
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: ${{ inputs.artifact-name }}
           path: ${{ inputs.artifact-path }}
@@ -167,7 +196,7 @@ jobs:
 
       - name: Upload build reports
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: build-reports
           path: ${{ inputs.reports-path }}
@@ -191,14 +220,19 @@ jobs:
           RELEASE_ASSETS: ${{ inputs.release-assets }}
         shell: bash
         run: |
-          tag=$(git describe --tags --abbrev=0)
+          tag='${{ steps.release-version.outputs.tag }}'
           assets=()
           while IFS= read -r pattern; do
             [[ -z "$pattern" ]] && continue
             for file in $pattern; do assets+=("$file"); done
           done <<< "$RELEASE_ASSETS"
-          printf '%s\n' "$CHANGELOG_CONTENT" | head -n -1 | gh release create "$tag" \
-            "${assets[@]}" --title "Release v$RELEASE_VERSION" --notes-file -
+          if [[ -n "$CHANGELOG_CONTENT" ]]; then
+            printf '%s\n' "$CHANGELOG_CONTENT" | head -n -1 | gh release create "$tag" \
+              "${assets[@]}" --title "Release v$RELEASE_VERSION" --notes-file -
+          else
+            gh release create "$tag" "${assets[@]}" \
+              --title "Release v$RELEASE_VERSION" --generate-notes --verify-tag
+          fi
 
       - name: Create tagged GitHub Release
         if: startsWith(github.ref, 'refs/tags/')
@@ -213,5 +247,10 @@ jobs:
             [[ -z "$pattern" ]] && continue
             for file in $pattern; do assets+=("$file"); done
           done <<< "$RELEASE_ASSETS"
-          printf '%s\n' "$CHANGELOG_CONTENT" | gh release create "$GITHUB_REF_NAME" \
-            "${assets[@]}" --title "Release $GITHUB_REF_NAME" --notes-file - --generate-notes
+          if [[ -n "$CHANGELOG_CONTENT" ]]; then
+            printf '%s\n' "$CHANGELOG_CONTENT" | gh release create "$GITHUB_REF_NAME" \
+              "${assets[@]}" --title "Release $GITHUB_REF_NAME" --notes-file - --generate-notes
+          else
+            gh release create "$GITHUB_REF_NAME" "${assets[@]}" \
+              --title "Release $GITHUB_REF_NAME" --generate-notes --verify-tag
+          fi
