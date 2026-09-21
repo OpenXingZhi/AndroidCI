@@ -25,6 +25,7 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: read
+      packages: read
     steps:
       - name: Checkout code
         uses: actions/checkout@v7
@@ -45,6 +46,8 @@ jobs:
 
       - name: Build and test
         run: ./gradlew ${{ inputs.build-task }} --no-daemon
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
   publish:
     name: Publish
