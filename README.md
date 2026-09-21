@@ -94,6 +94,13 @@ Branch pushes and pull requests run `build`. A `v*.*.*` tag first builds, verifi
 
 The workflow automatically exposes GitHub Packages credentials as Gradle properties named `GitHubPackagesUsername` and `GitHubPackagesPassword`.
 
+Application `settings.gradle.kts` files can replace the repeated GitHub Packages
+`maven { }` blocks with the `com.xingzhi.github-packages` settings plugin
+published from [android-bootstrap](https://github.com/OpenXingZhi/android-bootstrap).
+`pluginManagement` still needs one authenticated
+`https://maven.pkg.github.com/OpenXingZhi/android-bootstrap` repository to resolve
+the plugin itself.
+
 ## Repository access
 
 Because this repository is private, its Actions access must be set to **Accessible from repositories in the OpenXingZhi organization**. Callers pass secrets with `secrets: inherit`; only secrets declared by this workflow are consumed.
