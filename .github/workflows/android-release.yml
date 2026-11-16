@@ -82,6 +82,17 @@ on:
       GRADLE_PROPERTIES:
         description: Optional newline-delimited, application-specific Gradle properties
         required: false
+      SENTRY_AUTH_TOKEN:
+        required: false
+      SENTRY_DSN:
+        required: false
+      SENTRY_ORG:
+        required: false
+      SENTRY_PROJECT:
+        required: false
+      SENTRY_URL:
+        description: Optional self-hosted Sentry base URL
+        required: false
 
 permissions:
   contents: write
@@ -103,6 +114,11 @@ jobs:
     env:
       ORG_GRADLE_PROJECT_GitHubPackagesUsername: ${{ github.actor }}
       ORG_GRADLE_PROJECT_GitHubPackagesPassword: ${{ secrets.GITHUB_TOKEN }}
+      SENTRY_AUTH_TOKEN: ${{ secrets.SENTRY_AUTH_TOKEN }}
+      SENTRY_ORG: ${{ secrets.SENTRY_ORG }}
+      SENTRY_PROJECT: ${{ secrets.SENTRY_PROJECT }}
+      SENTRY_URL: ${{ secrets.SENTRY_URL }}
+      ORG_GRADLE_PROJECT_sentryDsn: ${{ secrets.SENTRY_DSN }}
     steps:
       - name: Checkout code
         uses: actions/checkout@v7

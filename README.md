@@ -94,6 +94,18 @@ Branch pushes and pull requests run `build`. A `v*.*.*` tag first builds, verifi
 
 The workflow automatically exposes GitHub Packages credentials as Gradle properties named `GitHubPackagesUsername` and `GitHubPackagesPassword`.
 
+## Optional Sentry secrets
+
+`android-release.yml` also accepts optional `workflow_call` secrets. Callers that omit them are unchanged: the values are empty, and mapping upload stays off unless `SENTRY_AUTH_TOKEN` is non-empty.
+
+- `SENTRY_AUTH_TOKEN`: Sentry auth token. When it is non-empty, the Sentry Android Gradle Plugin can upload R8 mappings during the signed `assembleRelease` (`build-task`) step.
+- `SENTRY_DSN`: exported as `ORG_GRADLE_PROJECT_sentryDsn` so the app's `providers.gradleProperty("sentryDsn")` resolves without a checked-in DSN.
+- `SENTRY_ORG`: Sentry organization slug.
+- `SENTRY_PROJECT`: Sentry project slug.
+- `SENTRY_URL`: optional self-hosted Sentry base URL.
+
+The build job passes `SENTRY_AUTH_TOKEN`, `SENTRY_ORG`, `SENTRY_PROJECT`, `SENTRY_URL`, and `ORG_GRADLE_PROJECT_sentryDsn` through to Gradle. `secrets: inherit` forwards whichever of these exist on the caller. Explicit `secrets:` maps may omit them because each one is `required: false`.
+
 Application `settings.gradle.kts` files can replace the repeated GitHub Packages
 `maven { }` blocks with the `com.xingzhi.github-packages` settings plugin
 published from [android-bootstrap](https://github.com/OpenXingZhi/android-bootstrap).
